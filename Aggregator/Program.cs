@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Consul;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
@@ -6,6 +8,11 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddHttpClient<IMusicService, MusicServiceClient>();
 builder.Services.AddHttpClient<ILyricsService, LyricsServiceClient>();
+
+builder.Services.AddSingleton<IConsulClient, ConsulClient>(p => new ConsulClient(consulConfig =>
+{
+    consulConfig.Address = new Uri("http://localhost:8500");
+}));
 
 var app = builder.Build();
 
@@ -47,15 +54,19 @@ public interface ILyricsService
 public class MusicServiceClient : IMusicService
 {
     private readonly HttpClient _httpClient;
+    private readonly IConsulClient _consulClient;
 
-    public MusicServiceClient(HttpClient httpClient)
+    public MusicServiceClient(HttpClient httpClient, IConsulClient consulClient)
     {
         _httpClient = httpClient;
+        _consulClient = consulClient;
     }
 
     public List<Song> GetSongs()
     {
-        var response = _httpClient.GetStringAsync($"http://localhost:5167/songs").Result;
+        var services = _consulClient.Agent.Services().Result.Response;
+        var musicService = services.Values.FirstOrDefault(s => s.Service.Equals("music"));
+        var response = _httpClient.GetStringAsync($"http://{musicService.Address}:{musicService.Port}/songs").Result;
         var songs = JsonSerializer.Deserialize<List<Song>>(response);
         return songs;
     }
@@ -64,15 +75,19 @@ public class MusicServiceClient : IMusicService
 public class LyricsServiceClient : ILyricsService
 {
     private readonly HttpClient _httpClient;
-
-    public LyricsServiceClient(HttpClient httpClient)
+    private readonly IConsulClient _consulClient;
+    
+    public LyricsServiceClient(HttpClient httpClient, IConsulClient consulClient)
     {
         _httpClient = httpClient;
+        _consulClient = consulClient;
     }
 
     public List<Lyrics> GetLyrics()
     {
-        var response = _httpClient.GetStringAsync($"http://localhost:5259/lyrics").Result;
+        var services = _consulClient.Agent.Services().Result.Response;
+        var lyricsService = services.Values.FirstOrDefault(s => s.Service.Equals("lyrics"));
+        var response = _httpClient.GetStringAsync($"http://{lyricsService.Address}:{lyricsService.Port}/lyrics").Result;
         var lyrics = JsonSerializer.Deserialize<List<Lyrics>>(response);
         return lyrics;
     }
